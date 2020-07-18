@@ -1,0 +1,65 @@
+emulate -L zsh
+setopt err_return
+
+if (( !$+commands[kubectl] )); then
+    print -u2 "kubectl not found"
+    return 1
+fi
+
+if (( !$+commands[fzf] )); then
+    print -u2 "fzf not found"
+    return 1
+fi
+
+# Two joined squares unicode to represent namespace symbol.
+# Used as delimiter
+local -r ns_delim=' [32m⧉[m '
+
+local -r ctxs=$(kc config view \
+    -o template='
+        {{- range .contexts }}
+            {{- .name }}
+            {{- if .context.namespace }}
+            {{- printf "'$ns_delim'%s" .context.namespace }}
+            {{- end }}
+            {{- "\n" }}
+        {{- end }}'
+)
+
+local -r ctx_choice=("${(@f)$(
+    print $ctxs \
+        | FZF_DEFAULT_OPTS= fzf --layout=reverse --height='40%' \
+            --ansi \
+            --nth=1 --expect=tab \
+            --header="Available kubectl contexts (with current${ns_delim}namespace)
+ - <Tab> switches namespaces for selected context
+ - <Enter> selects context"
+)}")
+
+if [[ -z $ctx_choice ]]; then
+    zle redisplay
+    return 0
+fi
+
+local -r ctx=${ctx_choice[2]%% *}
+if [[ $ctx_choice[1] == tab ]]; then
+    zle redraw-prompt
+    local -r namespace=$(
+        kubectl --context=$ctx get ns -o custom-columns=name:.metadata.name --no-headers \
+            | FZF_DEFAULT_OPTS= fzf --layout=reverse --height='40%' \
+                --header="Namespaces for context $ctx"
+    )
+    if [[ -n $namespace ]]; then
+        kubectl config use-context $ctx &> /dev/null
+        kubectl config set-context --current --namespace=$namespace &> /dev/null
+        zle redraw-prompt
+        return 0
+    fi
+fi
+
+kubectl config use-context "$ctx" &> /dev/null
+local result=$?
+zle redraw-prompt
+return $result
+
+# vim: ft=zsh

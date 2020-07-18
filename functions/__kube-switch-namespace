@@ -1,0 +1,29 @@
+emulate -L zsh
+setopt err_return
+
+if (( !$+commands[kubectl] )); then
+    print -u2 "kubectl not found"
+    return 1
+fi
+
+if (( !$+commands[fzf] )); then
+    print -u2 "fzf not found"
+    return 1
+fi
+
+local -r current_ctx=$(kubectl config current-context)
+local -r namespace=$(
+    kubectl --context=$ctx get ns -o custom-columns=name:.metadata.name --no-headers \
+        | fzf --layout=reverse --height='40%' \
+            --header="Namespaces in $current_ctx"
+)
+if [[ -z $namespace ]]; then
+    zle redisplay
+    return 0
+fi
+
+kubectl config set-context --current --namespace=$namespace &> /dev/null
+zle redraw-prompt
+return 0
+
+# vim: ft=zsh
